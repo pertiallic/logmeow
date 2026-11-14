@@ -1,8 +1,4 @@
-local middle = {{{{type = "prop", value = 2, args = {{type = "val", value = 1}, {type = "num", value = 2}, {type = "val", value = 2}}}}},
- query = {{type = "cprop", value = 1, args = {{type = "num", value = 1}, {type = "val", value = 1}}}}}
 Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
--- 
---  
 
 local function _deep_copy(t)
     if type(t) ~= "table" then return t
@@ -21,11 +17,11 @@ local function apply_args(from, args, to, index)
     for k, v in pairs(from) do
         if type(v) == "table" then
             to[k] = {}
-            if v.type == "val" and args[v.value] then
+            if v.type == "var" and args[v.value] then
                 to[k].type = args[v.value].type
                 to[k].value = _deep_copy(args[v.value].value)
                 to[k].index = args[v.value].index
-            elseif v.type == "val" then
+            elseif v.type == "var" then
                 to[k].type = v.type
                 to[k].value = v.value
                 to[k].index = index
@@ -39,24 +35,17 @@ local function apply_args(from, args, to, index)
 end
 
 local function _table_to_string(t)
+    if t == nil then return "nil" end
     local out = "{"
     for k, v in pairs(t) do
         if type(v) == "table" then
             out = out .. tostring(k) .. " = " .. _table_to_string(v) .. ", "
         else
-            out = out .. tostring(k) .. " = ".. tostring(v) .. ", "
+            out = out .. tostring(k) .. " = ".. string.gsub(tostring(v), "\n", "\\n") .. ", "
         end
     end
     out = out .. "}"
     return out
-end
-
-local function reduction(goal, index)
-    local to = {}
-    if goal.type == "cprop" then
-        apply_args(middle[goal.value], goal.args, to, index) --修正案件
-    end
-    return to
 end
 
 local builtins = {
@@ -132,21 +121,21 @@ end
 local function _check_types(args, argtype)
     if #args < #argtype then return false end
     for i = 1, #argtype do
-        if argtype[i] ~= "any" and args[i].type ~= "val" and argtype[i] ~= args[i].type then return false end
+        if argtype[i] ~= "any" and args[i].type ~= "var" and argtype[i] ~= args[i].type then return false end
     end
     return true
 end
 
-local function _count_vals(args)
-    local ifval = {}
+local function _count_vars(args)
+    local ifvar = {}
     local c = 0
     for i, v in ipairs(args) do
-        if v.type == "val" then
-            ifval[i] = true
+        if v.type == "var" then
+            ifvar[i] = true
             c = c + 1
         end
     end
-    return  c, ifval
+    return  c, ifvar
 end
 
 local function _unicode_read()
@@ -172,22 +161,21 @@ end
 ---- 1 -> 正しい代入がある
 ---TODO: 分解
 ---@param prop table assert(prop.type == "prop")
----@param numval number
----@param ifval table
+---@param numvar number
+---@param ifvar table
 ---@return integer
 ---@return string|table
-local function calc_builtin_subst(prop, numval, ifval)
+local function calc_builtin_subst(prop, numvar, ifvar)
     -- assert(prop.type == "prop")
-    local subst = {}
     local propindex = prop.value
     local propdata = builtins[propindex]
     local arity = propdata.arity
     if #prop.args < arity then return -2, "insufficient args" end
-    if numval >= 3 then return -1, {} end
-    if numval == 2 and propdata.type ~= "input" and propdata.flag ~= "eq" then return -1, {} end
-    if numval == 2 and propdata.flag == "eq" then return 1, {[prop.args[2].value] = {[prop.args[2].index] = prop.arg[1]}} end
+    if numvar >= 3 then return -1, {} end
+    if numvar == 2 and propdata.type ~= "input" and propdata.flag ~= "eq" then return -1, {} end
+    if numvar == 2 and propdata.flag == "eq" then return 1, {[prop.args[2].value] = {[prop.args[2].index] = prop.arg[1]}} end
     if not _check_types(prop.args, propdata.argtype) then return 0, {} end
-    if numval == 0 then
+    if numvar == 0 then
         if propdata.type == "input" or propdata.type == "output" then return 0, {} end
         local args = {}
         for i = 1, arity do table.insert(args, prop.args[i].value) end
@@ -200,40 +188,45 @@ local function calc_builtin_subst(prop, numval, ifval)
             return 0, {}
         end
     end
-    if numval == 1 then
+    if numvar == 1 then
         if propdata.type == "input" then return 0, {} end
         if propdata.type == "output" then
-            if ifval[3] then
+            if ifvar[3] then
                 io.write(utf8.char(prop.args[2].value))
-                return 1, {[prop.args[3].value] = {[prop.args[3].index] = prop.args[1]}}
+                local result = prop.args[1]
+                if debug then
+                    result = _deep_copy(prop.args[1])
+                    result.value = result.value .. utf8.char(prop.args[2].value)
+                end
+                return 1, {[prop.args[3].value] = {[prop.args[3].index] = result}}
             end
             return 0, {}
         end
         if propdata.type == "prop" then return -1, {} end
         -- assert(propdata.type == "calc")
-        local valind = 0
-        for i = 1, arity do if ifval[i] then valind = i end end
+        local varind = 0
+        for i = 1, arity do if ifvar[i] then varind = i end end
         local args = {}
-        for i = 1, arity do if i ~= valind then table.insert(args, prop.args[i].value) end end
-        if propdata[valind] then
-            local result = propdata[valind](table.unpack(args))
+        for i = 1, arity do if i ~= varind then table.insert(args, prop.args[i].value) end end
+        if propdata[varind] then
+            local result = propdata[varind](table.unpack(args))
             local out = {}
             if not result then return 0, {} end
-            if propdata.argtype[valind] == "any" then
+            if propdata.argtype[varind] == "any" then
                 if propdata.flag == "eq" then
-                    out = {[prop.args[valind].value] = {[prop.args[valind].index] = {type = prop.args[3 - valind].type, value = result}}}
+                    out = {[prop.args[varind].value] = {[prop.args[varind].index] = {type = prop.args[3 - varind].type, value = result}}}
                 else
-                    out= {[prop.args[valind].value] = {[prop.args[valind].index] = result}}
+                    out= {[prop.args[varind].value] = {[prop.args[varind].index] = result}}
                 end
             else
-                out = {[prop.args[valind].value] = {[prop.args[valind].index] = {type = propdata.argtype[valind], value = result}}}
+                out = {[prop.args[varind].value] = {[prop.args[varind].index] = {type = propdata.argtype[varind], value = result}}}
             end
             return 1, out
         end
         return -1, {}
     end
     -- assert(propdata.type == "input")
-    if not (ifval[2] and ifval[3]) then return 0, {} end
+    if not (ifvar[2] and ifvar[3]) then return 0, {} end
     if prop.args[2].index == prop.args[3].index and prop.args[2].value == prop.args[3].value then return 0, {} end
     local c = _unicode_read()
     local _, b = utf8.codes(c)(c, 0)
@@ -245,34 +238,231 @@ local function calc_builtin_subst(prop, numval, ifval)
     return 1, out
 end
 
-local function apply_subst(from, subst, to)
+local function _apply_subst(from, subst, to)
     for k, v in pairs(from) do
         if type(v) == "table" then
             to[k] = {}
-            if v.type == "val" and (subst[v.value] or {})[v.index] then
+            if v.type == "var" and (subst[v.value] or {})[v.index] then
                 to[k].type = subst[v.value][v.index].type
                 to[k].value = _deep_copy(subst[v.value][v.index].value)
                 to[k].index = subst[v.value][v.index].index
-            elseif v.type == "val" then
+            elseif v.type == "var" then
                 to[k].type = v.type
                 to[k].value = v.value
                 to[k].index = v.index
             else
-                apply_subst(v, subst, to[k])
+                _apply_subst(v, subst, to[k])
             end
         else
             to[k] = v
         end
-        
     end
 end
 
-local prop = {type = "prop", value = 2, args = {{type = "num", value = 3}, {type = "num", value = 4}, {type = "val", value = 1, index = 0}}}
-local c, ifval = _count_vals(prop.args)
-local result, subst = calc_builtin_subst(prop, c, ifval)
-local a = {type = "cprop", value = 1, args = {{type = "pair", value = {{type = "val", value = 1, index = 0}, {type = "num", value = 10}}}, {type = "val", value = 2, index = 0}}}
-local to = {}
-if result == 1 then
-    apply_subst(a, {}, to)
+local function _apply_subst_self(subst, to)
+    local tmp = _deep_copy(to)
+    for k, v in pairs(tmp) do
+        if type(v) == "table" then
+            to[k] = {}
+            if v.type == "var" and (subst[v.value] or {})[v.index] then
+                to[k].type = subst[v.value][v.index].type
+                to[k].value = _deep_copy(subst[v.value][v.index].value)
+                to[k].index = subst[v.value][v.index].index
+            elseif v.type == "var" then
+                to[k].type = v.type
+                to[k].value = v.value
+                to[k].index = v.index
+            else
+                _apply_subst(v, subst, to[k])
+            end
+        else
+            to[k] = v
+        end
+    end
 end
-print(result, _table_to_string(to))
+
+local function _subst_merge(from, to)
+    for var, k in pairs(from) do
+        for ind, v in pairs(k) do
+            if not to[var] then
+                to[var] = {}
+            end
+            to[var][ind] = v 
+        end
+    end
+end
+
+local function _snapshot_to_string(snap)
+    if snap.type == "world" then
+        return "world(" .. string.gsub(snap.value, "\n", "\\n") .. ")"
+    end
+    if snap.type == "var" then
+        return "_(" .. snap.value .. "," .. snap.index .. ")"
+    end
+    if snap.type == "num" then
+        return tostring(snap.value)
+    end
+    if snap.type == "pair" then
+        return _snapshot_to_string(snap.value[1]) .. " " ..  _snapshot_to_string(snap.value[2]) .. " pair"
+    end
+    local out = ""
+    if snap.type == "or" then
+        for i, v in ipairs(snap.value) do
+            if i == snap.done then
+                out = out .. "[" 
+            else
+                out = out .. "{"
+            end
+            for _, w in ipairs(v) do
+                out = out .. _snapshot_to_string(w) .. " "
+            end
+            if i == snap.done then
+                out = out .. "], " 
+            else
+                out = out .. "}, "
+            end
+        end
+        return out
+    end
+    if snap.type == "prop" then
+        for i, v in ipairs(snap.args) do
+            out = out .. _snapshot_to_string(v) .. " "
+        end
+        return out .. Props[snap.value]
+    end
+    if snap.type == "cprop" then
+        for i, v in ipairs(snap.args) do
+            out = out .. _snapshot_to_string(v) .. " "
+        end
+        return out .. "P(" .. snap.value .. ")"
+    end
+    for i, v in ipairs(snap) do
+        for j, w in ipairs(v) do
+            out = out .. _snapshot_to_string(w) .. " "
+        end
+        out = out .. "ret=" .. tostring(v.ret) .. ", substdif=" .. _table_to_string(v.substdif) .. "\\\n"
+    end
+    return out
+end
+
+local function _print_debug_info(t, snapshots, tag)
+    print(tag)
+    print("t:", t)
+    print(_snapshot_to_string(snapshots))
+end
+
+---パースしたデータ構造からプログラムを実行する
+---TODO: 分解
+---@param middle table パースしたやつ
+---@param debug? boolean デバッグモード
+---@return table subst 結果的な代入 失敗したら`{}`
+local function run(middle, debug) 
+    debug = debug or false
+    local snapshots = {middle.query}
+    local t = 1
+    local index = 1
+    local failed = false
+
+    while #snapshots ~= 0 and #(snapshots[#snapshots]) >= t do
+        if debug then _print_debug_info(t, snapshots, "start") end
+        local propdata = snapshots[#snapshots][t]
+        if propdata.type == "cprop" then
+            local add = {}
+            apply_args(middle[propdata.value], propdata.args, add, index)
+            index = index + 1
+            table.move(add, 1, #add, #(snapshots[#snapshots]) + 1, snapshots[#snapshots])
+            table.remove(snapshots[#snapshots], t)
+            propdata = snapshots[#snapshots][t]
+        end
+        if debug then _print_debug_info(t, snapshots, "cprop") end
+        if propdata.type == "prop" then
+            local c, ifvar = _count_vars(propdata.args)
+            local result, tmpsubst = calc_builtin_subst(propdata, c, ifvar)
+            if ((tmpsubst[1] or {})[0] or {}).type ~= nil and ((tmpsubst[1] or {})[0] or {}).type ~= "world" then error("world型の変数にworld型ではない数値が代入されました") end
+            if result == -2 or type(tmpsubst) == "string" then error("エラー: " .. tmpsubst) end
+            if result == -1 then
+                t = t + 1
+                goto continue1
+            end
+            if result == 0 then
+                if #snapshots == 0 then return {} end
+                t = snapshots[#snapshots].ret
+                failed = true
+                table.remove(snapshots)
+                propdata = snapshots[#snapshots][t]
+                goto continue1
+            end
+            table.remove(snapshots[#snapshots], t)
+            t = 1
+            propdata = snapshots[#snapshots][t]
+            _apply_subst_self(tmpsubst, snapshots[#snapshots])
+            _subst_merge(tmpsubst, snapshots[#snapshots].substdif)
+            ::continue1::
+        end
+        if debug then _print_debug_info(t, snapshots, "\nprop") end
+        if #snapshots == 0 then return {} end
+        while #(snapshots[#snapshots]) == 0 do
+            if #snapshots == 1 then return snapshots[1].substdif end
+            t = snapshots[#snapshots].ret
+            _apply_subst_self(snapshots[#snapshots].substdif, snapshots[#snapshots-1])
+            _subst_merge(snapshots[#snapshots].substdif, snapshots[#snapshots-1].substdif)
+            table.remove(snapshots)
+            table.remove(snapshots[#snapshots], t)
+            t = 1
+            propdata = snapshots[#snapshots][t]
+        end
+        if debug then _print_debug_info(t, snapshots, "elim") end
+        if propdata.type == "or" then
+            if failed then
+                propdata.done = propdata.done + 1
+                failed = false
+                if propdata.done > #propdata.value then
+                    t = snapshots[#snapshots].ret
+                    failed = true
+                    table.remove(snapshots)
+                end
+                goto continue2
+            end
+            table.insert(snapshots, _deep_copy(snapshots[#snapshots]))
+            snapshots[#snapshots].ret = t
+            snapshots[#snapshots].substdif = {}
+            local newprops = _deep_copy(propdata.value[propdata.done])
+            table.move(newprops, 1, #newprops, #(snapshots[#snapshots]) + 1, snapshots[#snapshots])
+            table.remove(snapshots[#snapshots], t)
+            t = 1
+            ::continue2::
+        end
+        if debug then _print_debug_info(t, snapshots, "or") end
+    end
+    return {}
+end
+
+local middle = {
+    {{type = "or",
+    value = {{
+    {type = "prop", value = 7, args = {{type = "var", value = 1}, {type = "var", value = 3}, {type = "var", value = 2}}}
+    },{
+    {type = "prop", value = 4, args = {{type = "var", value = 3}, {type = "var", value = 4}}},
+    {type = "prop", value = 5, args = {{type = "var", value = 3}, {type = "var", value = 5}}},
+    {type = "prop", value = 7, args = {{type = "var", value = 1}, {type = "var", value = 4}, {type = "var", value = 6}}},
+    {type = "cprop", value = 1, args = {{type = "var", value = 6}, {type = "var", value = 2}, {type = "var", value = 5}}}
+    }},
+    done = 1}},
+ query = {
+    {type = "cprop", value = 1, args = {{type = "world", value = ""}, {type = "var", value = 1, index = 0},
+        {type = "pair", value =
+        {{type = "num", value = 78},
+          {type = "pair", value =
+        {{type = "num", value = 121},
+          {type = "pair", value =
+        {{type = "num", value = 97},
+          {type = "pair", value =
+        {{type = "num", value = 110},
+         {type = "num", value = 10}
+        }}}}}}}}}},
+    substdif = {}}}
+
+local debug = true
+local result = run(middle, debug)
+if debug then print(_table_to_string(result)) end
+if result[1] == nil then print("execution failed") end
