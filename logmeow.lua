@@ -325,19 +325,19 @@ local function _snapshot_to_string(snap)
         return out
     end
     if snap.type == "prop" then
-        for i, v in ipairs(snap.args) do
+        for _, v in ipairs(snap.args) do
             out = out .. _snapshot_to_string(v) .. " "
         end
         return out .. Props[snap.value]
     end
     if snap.type == "cprop" then
-        for i, v in ipairs(snap.args) do
+        for _, v in ipairs(snap.args) do
             out = out .. _snapshot_to_string(v) .. " "
         end
         return out .. "P(" .. snap.value .. ")"
     end
-    for i, v in ipairs(snap) do
-        for j, w in ipairs(v) do
+    for _, v in ipairs(snap) do
+        for _, w in ipairs(v) do
             out = out .. _snapshot_to_string(w) .. " "
         end
         out = out .. "ret=" .. tostring(v.ret) .. ", substdif=" .. _table_to_string(v.substdif) .. "\\\n"
