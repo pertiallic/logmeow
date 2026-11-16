@@ -1,5 +1,3 @@
-Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
-
 local function _deep_copy(t)
     if type(t) ~= "table" then return t
     end
@@ -138,24 +136,16 @@ local function _count_vars(args)
     return  c, ifvar
 end
 
-local function _unicode_read()
-    local out = io.read(1)
-    local b = string.byte(out)
-    if b < 128 then
-        -- pass
-    elseif b < 0xe0 then
-        out =  out .. io.read(1)
-    elseif b < 0xf0 then
-        out = out .. io.read(2)
-    else 
-        out =  out .. io.read(3)
-    end
-    if out ~= "\n" then _ = io.read(1) end -- \n読み取り避け
-    return out
+local function handle_input(world)
+    local out = _deep_copy(world)
+    if out.value.inp == "" then out.value.inp = out.value.inp .. io.read() end
+    if out.value.inp == "" then out.value.inp = out.value.inp .. "\0" end
+    local c = string.sub(out.value.inp, 1, utf8.offset(out.value.inp, 2) - 1)
+    out.value.inp = string.sub(out.value.inp, utf8.offset(out.value.inp, 2), -1)
+    return c, out
 end
 
 ---builtinの命題たちを計算して正しい代入を返す 第一の出力が
----- -2 -> エラー
 ---- -1 -> 引数が十分確定していない
 ---- 0 -> 正しい代入がない
 ---- 1 -> 正しい代入がある
@@ -170,7 +160,7 @@ local function calc_builtin_subst(prop, numvar, ifvar)
     local propindex = prop.value
     local propdata = builtins[propindex]
     local arity = propdata.arity
-    if #prop.args < arity then return -2, "insufficient args" end
+    if #prop.args < arity then error("十分な引数がありません") end
     if numvar >= 3 then return -1, {} end
     if numvar == 2 and propdata.type ~= "input" and propdata.flag ~= "eq" then return -1, {} end
     if numvar == 2 and propdata.flag == "eq" then return 1, {[prop.args[2].value] = {[prop.args[2].index] = prop.arg[1]}} end
@@ -196,7 +186,7 @@ local function calc_builtin_subst(prop, numvar, ifvar)
                 local result = prop.args[1]
                 if debug then
                     result = _deep_copy(prop.args[1])
-                    result.value = result.value .. utf8.char(prop.args[2].value)
+                    result.value.out = result.value.out .. utf8.char(prop.args[2].value)
                 end
                 return 1, {[prop.args[3].value] = {[prop.args[3].index] = result}}
             end
@@ -228,13 +218,13 @@ local function calc_builtin_subst(prop, numvar, ifvar)
     -- assert(propdata.type == "input")
     if not (ifvar[2] and ifvar[3]) then return 0, {} end
     if prop.args[2].index == prop.args[3].index and prop.args[2].value == prop.args[3].value then return 0, {} end
-    local c = _unicode_read()
+    local c, w = handle_input(prop.args[1])
     local _, b = utf8.codes(c)(c, 0)
     local out = {}
     out[prop.args[2].value] = {}
     out[prop.args[3].value] = {}
     out[prop.args[2].value][prop.args[2].index] = {type = "num", value = b}
-    out[prop.args[3].value][prop.args[3].index] = prop.args[1]
+    out[prop.args[3].value][prop.args[3].index] = w
     return 1, out
 end
 
@@ -292,9 +282,9 @@ local function _subst_merge(from, to)
     end
 end
 
-local function _snapshot_to_string(snap)
+local function _props_to_string(snap)
     if snap.type == "world" then
-        return "world(" .. string.gsub(snap.value, "\n", "\\n") .. ")"
+        return "world(".. string.gsub(snap.value.inp, "\0", "\\0") .. "," .. string.gsub(snap.value.out, "\n", "\\n") .. ")"
     end
     if snap.type == "var" then
         return "_(" .. snap.value .. "," .. snap.index .. ")"
@@ -303,7 +293,7 @@ local function _snapshot_to_string(snap)
         return tostring(snap.value)
     end
     if snap.type == "pair" then
-        return _snapshot_to_string(snap.value[1]) .. " " ..  _snapshot_to_string(snap.value[2]) .. " pair"
+        return _props_to_string(snap.value[1]) .. " " ..  _props_to_string(snap.value[2]) .. " pair"
     end
     local out = ""
     if snap.type == "or" then
@@ -314,7 +304,7 @@ local function _snapshot_to_string(snap)
                 out = out .. "{"
             end
             for _, w in ipairs(v) do
-                out = out .. _snapshot_to_string(w) .. " "
+                out = out .. _props_to_string(w) .. " "
             end
             if i == snap.done then
                 out = out .. "], " 
@@ -326,19 +316,19 @@ local function _snapshot_to_string(snap)
     end
     if snap.type == "prop" then
         for _, v in ipairs(snap.args) do
-            out = out .. _snapshot_to_string(v) .. " "
+            out = out .. _props_to_string(v) .. " "
         end
         return out .. Props[snap.value]
     end
     if snap.type == "cprop" then
         for _, v in ipairs(snap.args) do
-            out = out .. _snapshot_to_string(v) .. " "
+            out = out .. _props_to_string(v) .. " "
         end
         return out .. "P(" .. snap.value .. ")"
     end
     for _, v in ipairs(snap) do
         for _, w in ipairs(v) do
-            out = out .. _snapshot_to_string(w) .. " "
+            out = out .. _props_to_string(w) .. " "
         end
         out = out .. "ret=" .. tostring(v.ret) .. ", substdif=" .. _table_to_string(v.substdif) .. "\\\n"
     end
@@ -348,7 +338,7 @@ end
 local function _print_debug_info(t, snapshots, tag)
     print(tag)
     print("t:", t)
-    print(_snapshot_to_string(snapshots))
+    print(_props_to_string(snapshots))
 end
 
 ---パースしたデータ構造からプログラムを実行する
@@ -379,7 +369,6 @@ local function run(middle, debug)
             local c, ifvar = _count_vars(propdata.args)
             local result, tmpsubst = calc_builtin_subst(propdata, c, ifvar)
             if ((tmpsubst[1] or {})[0] or {}).type ~= nil and ((tmpsubst[1] or {})[0] or {}).type ~= "world" then error("world型の変数にworld型ではない数値が代入されました") end
-            if result == -2 or type(tmpsubst) == "string" then error("エラー: " .. tmpsubst) end
             if result == -1 then
                 t = t + 1
                 goto continue1
@@ -437,7 +426,7 @@ local function run(middle, debug)
     return {}
 end
 
-local middle = {
+--[[local middle = {
     {{type = "or",
     value = {{
     {type = "prop", value = 7, args = {{type = "var", value = 1}, {type = "var", value = 3}, {type = "var", value = 2}}}
@@ -449,7 +438,7 @@ local middle = {
     }},
     done = 1}},
  query = {
-    {type = "cprop", value = 1, args = {{type = "world", value = ""}, {type = "var", value = 1, index = 0},
+    {type = "cprop", value = 1, args = {{type = "world", value = {out = "", inp = ""}}, {type = "var", value = 1, index = 0},
         {type = "pair", value =
         {{type = "num", value = 78},
           {type = "pair", value =
@@ -461,8 +450,15 @@ local middle = {
          {type = "num", value = 10}
         }}}}}}}}}},
     substdif = {}}}
+]]
 
-local debug = true
-local result = run(middle, debug)
-if debug then print(_table_to_string(result)) end
-if result[1] == nil then print("execution failed") end
+local middle = {
+    {{type = "prop", value = 6, args = {{type = "var", value = 1},{type = "var", value = 3}, {type = "var", value = 4}}},
+    {type = "prop", value = 7, args = {{type = "var", value = 4},{type = "var", value = 3}, {type = "var", value = 5}}},
+    {type = "cprop", value = 1, args = {{type = "var", value = 5},{type = "var", value = 2}}}},
+ query = {{type = "cprop", value = 1, args = {{type = "world", value = {out = "", inp = ""}}, {type = "var", value = 1, index = 0}}},
+    substdif = {}}}
+
+Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
+
+print(_table_to_string(run(middle, true)))
