@@ -45,7 +45,11 @@ Prologに影響を受けていますが、純粋な論理プログラミング�
 
 `lua logmeow.lua file`
 
-で行えます
+で行えます。
+
+`lua logmeow.loa file -d (log-file)`
+
+で`log-file`が指定されていたらそのファイルに、そうでなければ`log/`下にファイルを作ってそこにdebugのためのlogを流します。
 
 == 文法
 

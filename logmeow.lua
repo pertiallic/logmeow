@@ -20,6 +20,56 @@ local function _table_to_string(t)
     return out
 end
 
+Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
+
+local function _format_term(term, terms_table)
+    if #terms_table[term] == 1 then return "_" .. term end
+    if terms_table[term][2] == "num" then return tostring(terms_table[term][3]) end
+    if terms_table[term][2] == "world" then return "world(" .. terms_table[term][3] .. ", " .. terms_table[term][4] .. ")" end
+    assert(terms_table[term][2] == "pair", "_format_term: term is not a pair")
+    local pair_term = {term}
+    while terms_table[pair_term[#pair_term]][2] == "pair" do
+        local t = table.remove(pair_term)
+        for i = 3, #terms_table[t] do
+            table.insert(pair_term, terms_table[t][i])
+        end
+    end
+    local buff = {}
+    for _, t in ipairs(pair_term) do
+        table.insert(buff, _format_term(t, terms_table))
+    end
+    return "[" .. table.concat(buff, ", ") .. "]"
+end
+
+local function _format_goals(goals, terms_table, t, ind)
+    local out = {}
+    for i, g in ipairs(goals) do
+        local add = ""
+        if i == t then add = "<" end
+        local buff = {}
+        if g[1] == "or" then
+            for j = 2, #g do
+                if j - 1 == ind then
+                    table.insert(buff, "[" .. _format_goals(g[j], terms_table, 0, 0) .. "]")
+                else
+                    table.insert(buff, "{" .. _format_goals(g[j], terms_table, 0, 0) .. "}")
+                end
+            end
+            add = add .. table.concat(buff, " or ")
+        else
+            for j = 3, #g do
+                table.insert(buff, _format_term(g[j], terms_table))
+            end
+            if g[1] == "prop" then table.insert(buff, Props[g[2]]) end
+            if g[1] == "cprop" then table.insert(buff, "P" .. g[2]) end
+            add = add .. table.concat(buff, " ")
+        end
+        if i == t then add = add .. ">" end
+        table.insert(out, add)
+    end
+    return table.concat(out, ", ")
+end
+
 local builtins = {
     {type = "calc",
      arity = 2,
@@ -213,7 +263,7 @@ end
 ---@param terms_table table _deepcopyしてね
 ---@return integer
 ---@return table?
-local function calc_subst_of_builtin_new(prop, terms_table)
+local function calc_subst_of_builtin(prop, terms_table)
     assert(prop[1] == "prop", "calc_subst_of_builtin_new: the type is not prop")
     local argdatas = {}
     local numvar, ifvar = _count_vars_new(table.move(prop, 3, #prop, 1, argdatas), terms_table)
@@ -305,106 +355,7 @@ local function _decomposit_or(goals, t, ind)
     return goals_new
 end
 
----ゴールとユーザー定義関係から代入を求める
----- -1 -> 未完成
----- 0 -> 失敗
----- 1 -> 成功
----TODO: 分解
----@param goals table パースしたやつ
----@param cprops table ユーザー定義関係の一覧
----@param terms_table table 項の対応をみる
----@param debug? boolean デバッグモード
----@return integer
----@return table?
----@return table?
-local function calc_subst(goals, cprops, terms_table, debug)
-    debug = debug or false
-    local dif = {}
-    local t = 1
-    local step = 0
-    while t <= #goals and step <= 100 do
-        step = step + 1
-        --print(t, _table_to_string_i(goals), _table_to_string_i(terms_table))
-        if goals[t][1] == "prop" then
-            local result, subst = calc_subst_of_builtin_new(goals[t], terms_table)
-            if result == -1 then
-                t = t + 1
-                goto continue
-            end
-            if result == 0 then
-                return 0
-            end
-            assert(subst ~= nil, "calc_subst: prop: subst is nil")
-            table.remove(goals, t)
-            _subst_props_subst(goals, subst)
-            _subst_composit(dif, subst)
-            if #goals == 0 then return 1, dif, terms_table end
-            t = 1
-        end
-        if goals[t][1] == "cprop" then
-            local propdata = _deep_copy(cprops[goals[t][2]])
-            local subst = {}
-            for i, d in ipairs(propdata.terms) do
-                if type(d[2]) == "number" and d[2] <= #goals[t] - 2 then
-                    table.insert(subst, {i, goals[t][d[2] + 2]})
-                else
-                    if type(d[2]) == "number" then
-                        table.insert(terms_table, {#terms_table + 1})
-                    else
-                        table.insert(terms_table, table.move(d, 2, #d, 2, {#terms_table + 1}))
-                    end
-                    table.insert(subst, {i, #terms_table})
-                end
-            end
-            propdata.terms = nil
-            -- print(_table_to_string_i(tmpsubst))
-            _subst_props_subst(propdata, subst)
-            table.remove(goals, t)
-            table.move(propdata, 1, #propdata, #goals + 1, goals)
-            t = 1
-        end
-        if goals[t][1] == "or" then
-            local result = -1
-            local subst
-            local terms_table_new = {}
-            local ind = 1
-            while ind <= (#goals[t] - 1) do
-                terms_table_new = _deep_copy(terms_table)
-                result, subst, _ = calc_subst(_decomposit_or(goals, t, ind), cprops, terms_table_new)
-                if result == 0 then
-                    table.remove(goals[t], ind)
-                    if #goals[t] == 2 then
-                        local or_args = table.remove(goals, t)[2]
-                        for _, p in ipairs(or_args) do
-                            table.insert(goals, p)
-                        end
-                        t = 1
-                        goto continue
-                    end
-                end
-                if result == -1 then ind = ind + 1 end
-                if result == 1 then break end
-            end
-            if result == -1 then
-                t = t + 1
-                goto continue
-            end
-            assert(result == 1, "calc_subst: or: result is not 1")
-            terms_table = terms_table_new
-            table.remove(goals, t)
-            _subst_props_subst(goals, subst)
-            _subst_composit(dif, subst)
-            if #goals == 0 then return 1, dif, terms_table end
-            t = 1
-        end
-        ::continue::
-    end
-    return -1
-end
-
-Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
-
-local function main(prog)
+local function parser_nyan(prog)
     local initial = prog:gsub( "\\%s*", ""):gsub("にゃ", "1"):gsub("ん", "|"):gsub("ー", "0")
     local lines = {}
     for w in string.gmatch(initial, "[^\n]+") do
@@ -476,7 +427,123 @@ local function main(prog)
     local initial_goal = table.remove(cprops)
     local initial_terms = initial_goal.terms
     initial_goal.terms = nil
-    local result, _, result_terms = calc_subst(initial_goal, cprops, initial_terms)
+    return initial_goal, cprops, initial_terms
+
+end
+
+local parsers = {parser_nyan}
+
+---ゴールとユーザー定義関係から代入を求める
+---- -1 -> 未完成
+---- 0 -> 失敗
+---- 1 -> 成功
+---TODO: 分解
+---@param goals table パースしたやつ
+---@param cprops table ユーザー定義関係の一覧
+---@param terms_table table 項の対応をみる
+---@param debug_handler? fun(t, ind, goals, terms_table, dif, flag)
+---@return integer
+---@return table?
+---@return table?
+local function calc_subst(goals, cprops, terms_table, debug_handler)
+    local dif = {}
+    local t = 1
+    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "start") end
+    while t <= #goals do
+        --print(t, _table_to_string_i(goals), _table_to_string_i(terms_table))
+        if goals[t][1] == "prop" then
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "prop") end
+            local result, subst = calc_subst_of_builtin(goals[t], terms_table)
+            if result == -1 then
+                t = t + 1
+                goto continue
+            end
+            if result == 0 then
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_0") end
+                return 0
+            end
+            assert(subst ~= nil, "calc_subst: prop: subst is nil")
+            table.remove(goals, t)
+            _subst_props_subst(goals, subst)
+            _subst_composit(dif, subst)
+            if #goals == 0 then
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1") end
+                return 1, dif, terms_table
+            end
+            t = 1
+        end
+        if goals[t][1] == "cprop" then
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "cprop") end
+            local propdata = _deep_copy(cprops[goals[t][2]])
+            local subst = {}
+            for i, d in ipairs(propdata.terms) do
+                if type(d[2]) == "number" and d[2] <= #goals[t] - 2 then
+                    table.insert(subst, {i, goals[t][d[2] + 2]})
+                else
+                    if type(d[2]) == "number" then
+                        table.insert(terms_table, {#terms_table + 1})
+                    else
+                        table.insert(terms_table, table.move(d, 2, #d, 2, {#terms_table + 1}))
+                    end
+                    table.insert(subst, {i, #terms_table})
+                end
+            end
+            propdata.terms = nil
+            -- print(_table_to_string_i(tmpsubst))
+            _subst_props_subst(propdata, subst)
+            table.remove(goals, t)
+            table.move(propdata, 1, #propdata, #goals + 1, goals)
+            t = 1
+        end
+        if goals[t][1] == "or" then
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "or") end
+            local result = -1
+            local subst
+            local terms_table_new = {}
+            local ind = 1
+            while ind <= (#goals[t] - 1) do
+                terms_table_new = _deep_copy(terms_table)
+                if debug_handler then debug_handler(t, ind, goals, terms_table, dif, "create_branch") end
+                result, subst, _ = calc_subst(_decomposit_or(goals, t, ind), cprops, terms_table_new, debug_handler)
+                if result == 0 then
+                    table.remove(goals[t], ind)
+                    if #goals[t] == 2 then
+                        local or_args = table.remove(goals, t)[2]
+                        for _, p in ipairs(or_args) do
+                            table.insert(goals, p)
+                        end
+                        t = 1
+                        goto continue
+                    end
+                end
+                if result == -1 then ind = ind + 1 end
+                if result == 1 then break end
+            end
+            if result == -1 then
+                t = t + 1
+                goto continue
+            end
+            assert(result == 1, "calc_subst: or: result is not 1")
+            terms_table = terms_table_new
+            table.remove(goals, t)
+            _subst_props_subst(goals, subst)
+            _subst_composit(dif, subst)
+            if #goals == 0 then 
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1") end
+                return 1, dif, terms_table
+            end
+            t = 1
+        end
+        ::continue::
+    end
+    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_-1") end
+    return -1
+end
+
+local function main(prog, parse_mode, debug_handler)
+    parse_mode = parse_mode or 1
+    local initial_goals, cprops, initial_terms = parsers[parse_mode](prog)
+    local result, _, result_terms = calc_subst(initial_goals, cprops, initial_terms, debug_handler)
     assert(result == 1, "main: result is not 1")
     assert(result_terms ~= nil, "main: result_terms is nil")
     assert(result_terms[2][2] == "world", "main: terms[2] is not a world")
@@ -486,4 +553,27 @@ local arg = {...}
 local file = assert(io.open(arg[1], "r"))
 local prog = file:read("a")
 file:close()
-main(prog)
+
+local log = nil
+if arg[2] == "-d" then
+    if arg[3] == nil then
+        log = assert(io.open("log/".. os.date("%Y%m%d%H%M%S") ..".log", "w"))
+    else
+        log = assert(io.open(arg[3], "w"))
+    end
+end
+
+local function debug_write(t, ind, goals, terms_table, dif, flag)
+    assert(log)
+    log:write(flag .. "\n")
+    if not string.match(flag, "^return") then log:write(_format_goals(goals, terms_table, t, ind) .. "\n") end
+end
+
+if log then
+    main(prog, 1, debug_write)
+else
+    main(prog, 1)
+end
+if log then log:close() end
+
+
