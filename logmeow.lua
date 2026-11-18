@@ -25,7 +25,7 @@ Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "
 local function _format_term(term, terms_table)
     if #terms_table[term] == 1 then return "_" .. term end
     if terms_table[term][2] == "num" then return tostring(terms_table[term][3]) end
-    if terms_table[term][2] == "world" then return "world(" .. terms_table[term][3] .. ", " .. terms_table[term][4] .. ")" end
+    if terms_table[term][2] == "world" then return "world(" .. terms_table[term][3]:gsub("\0", "\\0") .. ", " .. terms_table[term][4]:gsub("\n", "\\n"):gsub("\0", "\\0") .. ")" end
     assert(terms_table[term][2] == "pair", "_format_term: term is not a pair")
     local pair_term = {term}
     while terms_table[pair_term[#pair_term]][2] == "pair" do
@@ -161,6 +161,22 @@ local function _subst_terms_table(terms_table, from, to)
     end
 end
 
+local function _subst_terms_table_subst(terms_table, subst)
+    assert(type(terms_table) == "table", "_subst_terms_table: terms_table is not a table")
+    for _, t in pairs(terms_table) do
+        if t[2] == "pair" then
+            for i = 3, #t do
+                for _, s in ipairs(subst) do
+                    if t[i] == s[1] then
+                        t[i] = s[2]
+                        break
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function _subst_props_subst(props, subst)
     assert(type(props) == "table", "_subst_props: props is not a table")
     assert(type(subst) == "table", "_subst_props: subst is not a table")
@@ -218,8 +234,11 @@ local function _unify(term1, term2, terms_table)
             goto continue
         end
         if terms_table[target[1]][2] ~= terms_table[target[2]][2] then return false end
-        if terms_table[target[1]][2] == "num" and terms_table[target[1]][3] ~= terms_table[target[2]][3] then 
+        if terms_table[target[1]][2] == "num" and terms_table[target[1]][3] ~= terms_table[target[2]][3] then
             return false
+        end
+        if terms_table[target[1]][2] == "num" and terms_table[target[1]][3] == terms_table[target[2]][3] then
+            goto continue 
         end
         table.insert(targets, {terms_table[target[1]][3], terms_table[target[2]][3]})
         local l, r = 0, 0
@@ -344,15 +363,6 @@ local function _subst_composit(to, subst)
         _subst_targets(to, k[1], k[2], false)
         table.insert(to, {k[1], k[2]})
     end
-end
-
-local function _decomposit_or(goals, t, ind)
-    local goals_new = _deep_copy(goals)
-    local or_args = table.remove(goals_new, t)[ind + 1]
-    for _, p in ipairs(or_args) do
-        table.insert(goals_new, p)
-    end
-    return goals_new
 end
 
 ---@param prog string
@@ -560,23 +570,28 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "cprop") end
             local propdata = _deep_copy(cprops[goals[t][2]])
             local subst = {}
+            local tmp_terms_table = {}
             for i, d in ipairs(propdata.terms) do
                 if type(d[2]) == "number" and d[2] <= #goals[t] - 2 then
                     table.insert(subst, {i, goals[t][d[2] + 2]})
                 else
                     if type(d[2]) == "number" then
-                        table.insert(terms_table, {#terms_table + 1})
+                        table.insert(tmp_terms_table, {#terms_table + #tmp_terms_table + 1})
                     else
-                        table.insert(terms_table, table.move(d, 2, #d, 2, {#terms_table + 1}))
+                        table.insert(tmp_terms_table, table.move(d, 2, #d, 2, {#terms_table + #tmp_terms_table + 1}))
                     end
-                    table.insert(subst, {i, #terms_table})
+                    table.insert(subst, {i, #terms_table + #tmp_terms_table})
                 end
             end
+            _subst_terms_table_subst(tmp_terms_table, subst)
             propdata.terms = nil
             -- print(_table_to_string_i(tmpsubst))
             _subst_props_subst(propdata, subst)
+            table.move(tmp_terms_table, 1, #tmp_terms_table, #terms_table + 1, terms_table)
             table.remove(goals, t)
-            table.move(propdata, 1, #propdata, #goals + 1, goals)
+            for i, p in ipairs(propdata) do
+                table.insert(goals, t + i - 1, p)
+            end
             t = 1
         end
         if goals[t][1] == "or" then
@@ -585,16 +600,17 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             local subst
             local terms_table_new = {}
             local ind = 1
+            local terms_table_new_maybe
             while ind <= (#goals[t] - 1) do
                 terms_table_new = _deep_copy(terms_table)
-                if debug_handler then debug_handler(t, ind, goals, terms_table, dif, "create_branch") end
-                result, subst, _ = calc_subst(_decomposit_or(goals, t, ind), cprops, terms_table_new, debug_handler)
+                if debug_handler then debug_handler(t, ind, goals, terms_table, dif, "\ncreate_branch") end
+                result, subst, terms_table_new_maybe = calc_subst(_deep_copy(goals[t][ind + 1]), cprops, terms_table_new, debug_handler)
                 if result == 0 then
-                    table.remove(goals[t], ind)
+                    table.remove(goals[t], ind + 1)
                     if #goals[t] == 2 then
                         local or_args = table.remove(goals, t)[2]
-                        for _, p in ipairs(or_args) do
-                            table.insert(goals, p)
+                        for i, p in ipairs(or_args) do
+                            table.insert(goals, t + i - 1, p)
                         end
                         t = 1
                         goto continue
@@ -608,15 +624,15 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
                 goto continue
             end
             assert(result == 1, "calc_subst: or: result is not 1")
-            terms_table = terms_table_new
+            assert(terms_table_new_maybe)
+            terms_table = terms_table_new_maybe
             table.remove(goals, t)
             _subst_props_subst(goals, subst)
             _subst_composit(dif, subst)
-            if #goals == 0 then 
+            if #goals == 0 then
                 if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1") end
                 return 1, dif, terms_table
             end
-            t = 1
         end
         ::continue::
     end
@@ -670,7 +686,7 @@ if arg.r then parser_mode = 2 end
 local function debug_write(t, ind, goals, terms_table, dif, flag)
     assert(log)
     log:write(flag .. "\n")
-    if not string.match(flag, "^return") then log:write(_format_goals(goals, terms_table, t, ind) .. "\n") end
+    log:write(_format_goals(goals, terms_table, t, ind) .. "\n")
 end
 
 if log then
