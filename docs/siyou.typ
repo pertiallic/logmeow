@@ -45,7 +45,15 @@ Prologに影響を受けていますが、純粋な論理プログラミング�
 
 `lua logmeow.lua file`
 
-で行えます
+で行えます。
+
+オプション`-d`の指定でdebugモードになります 。
+
+`lua logmeow.lua file -d (log-file)`
+
+で`log-file`が指定されていたらそのファイルに、そうでなければファイルを作ってそこにdebugのためのlogを流します。
+
+オプション`-r`の指定で読みやすい方の書き方（#ref(<otherway>)）で実行できます。
 
 == 文法
 
@@ -354,3 +362,5 @@ _1 _3 _2 print or _3 _4 proj1 _3 _5 proj2 _1 _4 _6 print _6 _2 _5 P1
 === 入出力 <io>
 
 == 変換 <transpile>
+
+=== 別の書き方 <otherway>
