@@ -1,12 +1,14 @@
 # Logmeow
 
-言語作る会で作った言語ですにゃ (=･ω･=)
+猫の言語ですにゃ (=･ω･=)
 
 ## 使い方
 
-`file`を実行するには
+`file`の実行は
 
 `lua logmeow.loa file`
+
+で行えます
 
 ## バグetc.
 
@@ -18,4 +20,6 @@
 
 ## 仕様
 
-準備中
+未完成ですが  
+[docs/siyou.pdf](docs/siyou.pdf)
+
