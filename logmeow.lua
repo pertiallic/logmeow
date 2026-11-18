@@ -9,23 +9,9 @@ end
 local function _table_to_string(t)
     if t == nil then return "nil" end
     local out = "{"
-    for k, v in pairs(t) do
-        if type(v) == "table" then
-            out = out .. tostring(k) .. " = " .. _table_to_string(v) .. ", "
-        else
-            out = out .. tostring(k) .. " = ".. string.gsub(tostring(v), "\n", "\\n") .. ", "
-        end
-    end
-    out = out .. "}"
-    return out
-end
-
-local function _table_to_string_i(t)
-    if t == nil then return "nil" end
-    local out = "{"
     for _, v in ipairs(t) do
         if type(v) == "table" then
-            out = out .. _table_to_string_i(v) .. ", "
+            out = out .. _table_to_string(v) .. ", "
         else
             out = out .. string.gsub(tostring(v), "\n", "\\n") .. ", "
         end
@@ -395,16 +381,9 @@ local function calc_subst(goals, cprops, terms_table, debug)
                         t = 1
                         goto continue
                     end
-                    goto continue2
                 end
-                if result == -1 then
-                    ind = ind + 1
-                    goto continue2
-                end
-                if result == 1 then
-                    break
-                end
-                ::continue2::
+                if result == -1 then ind = ind + 1 end
+                if result == 1 then break end
             end
             if result == -1 then
                 t = t + 1
@@ -423,23 +402,88 @@ local function calc_subst(goals, cprops, terms_table, debug)
     return -1
 end
 
---- termの書き方
---- {[元々の数値/termsのインデックス <- unique id], [型], [value, index etc]}
-
 Props = {"succ", "add", "mul", "proj1", "proj2", "input", "print", "eq", "le", "lt", "isnat", "ispair"}
 
-local cat_cprops = {{{"prop", 6, 1, 3, 4}, {"prop", 7, 4, 3, 5}, {"cprop", 1, 5, 2}, terms = {{1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}}}}
-local cat_initial_terms = {{1, "world", "", ""}, {2}}
-local cat_initial_goal = {{"cprop", 1, 1, 2}}
+local function main(prog)
+    local initial = prog:gsub( "\\%s*", ""):gsub("にゃ", "1"):gsub("ん", "|"):gsub("ー", "0")
+    local lines = {}
+    for w in string.gmatch(initial, "[^\n]+") do
+        table.insert(lines, w)
+    end
+    local cprops = {}
+    for i, w in ipairs(lines) do
+        local stack = {}
+        local vars = {}
+        local tmpterms = {}
+        local acc = {}
+        if i == #lines then
+            tmpterms = {{1, "world", "", ""}, {2}}
+            stack = {1, 2}
+        end
+        for u in string.gmatch(w, "[01]+") do
+            if u == "1" then
+                local r = table.remove(stack)
+                local l = table.remove(stack)
+                if tmpterms[r][2] == "pair" then
+                    table.insert(tmpterms[r], 3, l)
+                    table.insert(stack, r)
+                else
+                    table.insert(tmpterms, {#tmpterms + 1, "pair", l, r})
+                    table.insert(stack, #tmpterms)
+                end
+            elseif u == "10" then
+                if cprops[i] == nil then
+                    cprops[i] = {{"or"}}
+                end
+                table.insert(cprops[i][1], acc)
+                acc = {}
+            elseif string.match(u, "^101") then
+                local id = tonumber(string.sub(u, 3), 2)
+                if not vars[id] then
+                    vars[id] = #tmpterms + 1
+                    if i == #lines then
+                        table.insert(tmpterms, {#tmpterms + 1})
+                    else
+                        table.insert(tmpterms, {#tmpterms + 1, id})
+                    end
+                end
+                table.insert(stack, vars[id])
+            elseif string.match(u, "^1001") then
+                local id = tonumber(string.sub(u, 4), 2)
+                table.insert(acc, table.move(stack, 1, #stack, 3, {"prop", id}))
+                stack = {}
+            elseif string.match(u, "^10001") then
+                local id = tonumber(string.sub(u, 5), 2)
+                table.insert(acc, table.move(stack, 1, #stack, 3, {"cprop", id}))
+                stack = {}
+            elseif string.match(u, "^11") then
+                local num = tonumber(string.sub(u, 4), 2)
+                if "1" == string.sub(u, 3, 3) then num = -num end
+                table.insert(tmpterms, {#tmpterms + 1, "num", num})
+                table.insert(stack, #tmpterms)
+            else
+                table.insert(acc, u)
+            end
+        end
+        if cprops[i] == nil then
+            cprops[i] = acc
+        else
+            table.insert(cprops[i][1], acc)
+        end
+        cprops[i].terms = tmpterms
+    end
 
-local nyan_cprops = {{{"or", {{"prop", 7, 1, 3, 2}}, {{"prop", 4, 3, 4}, {"prop", 5, 3, 5}, {"prop", 7, 1, 4, 6}, {"cprop", 1, 6, 2, 5}}}, terms = {{1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}, {6, 6}}}}
-local nyan_initial_terms = {{1, "world", "", ""}, {2}, {3, "num", 78}, {4, "num", 121}, {5, "num", 97}, {6, "num", 110}, {7, "num", 10}}
-nyan_initial_terms[8] = {8, "pair", 3, 4, 5, 6, 7}
-local nyan_initial_goal = {{"cprop", 1, 1, 2, 8}}
+    local initial_goal = table.remove(cprops)
+    local initial_terms = initial_goal.terms
+    initial_goal.terms = nil
+    local result, _, result_terms = calc_subst(initial_goal, cprops, initial_terms)
+    assert(result == 1, "main: result is not 1")
+    assert(result_terms ~= nil, "main: result_terms is nil")
+    assert(result_terms[2][2] == "world", "main: terms[2] is not a world")
+end
 
-
-local terms = {{1, "num", 2}, {2, "num", 5}, {3}, {4}}
-local goals = {{"prop", 2, 1, 3, 4}, {"prop", 3, 1, 3, 4}}
-
-local result, subst, result_terms = calc_subst(nyan_initial_goal, nyan_cprops, nyan_initial_terms)
-print(result, _table_to_string_i(subst), _table_to_string_i(result_terms))
+local arg = {...}
+local file = assert(io.open(arg[1], "r"))
+local prog = file:read("a")
+file:close()
+main(prog)
