@@ -6,13 +6,26 @@
 
 `file`の実行は
 
-`lua logmeow.loa file`
+`lua logmeow.lua file`
 
 で行えます
 
-`lua logmeow.loa file -d (log-file)`
+オプション`-d`の指定でdebugモードになります 
 
-で`log-file`が指定されていたらそのファイルに、そうでなければ`log/`下にファイルを作ってそこにdebugのためのlogを流します
+`lua logmeow.lua file -d (log-file)`
+
+で`log-file`が指定されていたらそのファイルに、そうでなければファイルを作ってそこにdebugのためのlogを流します
+
+オプション`-r`の指定で読みやすい方の書き方で実行できます
+
+## example
+
+[プログラム例](docs/examples)
+
+`.meow`がにゃーんで`.meor`が読みやすいやつです
+
+nyan: "Nyan" と出力します  
+cat: 入力をそのまま出力します 無限ループです
 
 ## バグetc.
 

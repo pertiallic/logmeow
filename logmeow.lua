@@ -355,6 +355,7 @@ local function _decomposit_or(goals, t, ind)
     return goals_new
 end
 
+---@param prog string
 local function parser_nyan(prog)
     local initial = prog:gsub( "\\%s*", ""):gsub("にゃ", "1"):gsub("ん", "|"):gsub("ー", "0")
     local lines = {}
@@ -413,7 +414,7 @@ local function parser_nyan(prog)
                 table.insert(tmpterms, {#tmpterms + 1, "num", num})
                 table.insert(stack, #tmpterms)
             else
-                table.insert(acc, u)
+                error("parser_nyan: unknown token")
             end
         end
         if cprops[i] == nil then
@@ -423,15 +424,98 @@ local function parser_nyan(prog)
         end
         cprops[i].terms = tmpterms
     end
-
     local initial_goal = table.remove(cprops)
     local initial_terms = initial_goal.terms
     initial_goal.terms = nil
     return initial_goal, cprops, initial_terms
-
 end
 
-local parsers = {parser_nyan}
+---@param prog string
+local function parser_readable(prog)
+    local lines = {}
+    for l in string.gmatch(prog:gsub(",", " , "):gsub("%[", " [ "):gsub("%]", " ] "), "[^\n]+") do
+        local add = {}
+        for w in l:gmatch("[^%s]+") do
+            table.insert(add, w)
+        end
+        table.insert(lines, add)
+    end
+    local cprops = {}
+    for i, w in ipairs(lines) do
+        local stack = {}
+        local vars = {}
+        local tmpterms = {}
+        local acc = {}
+        if i == #lines then
+            tmpterms = {{1, "world", "", ""}, {2}}
+            stack = {1, 2}
+        end
+        for _, u in ipairs(w) do
+            if u == "," then
+                --pass
+            elseif u == "[" then
+                table.insert(stack, "[")
+            elseif u == "]" then
+                local t = table.remove(stack)
+                table.insert(tmpterms, {#tmpterms + 1, "pair"})
+                while t ~= "[" do
+                    table.insert(tmpterms[#tmpterms], 3, t)
+                    t = table.remove(stack)
+                end
+                assert(#tmpterms[#tmpterms] >= 4, "parser_readable: length of pair is 1")
+                table.insert(stack, #tmpterms)
+            elseif u == "or" then
+                if cprops[i] == nil then
+                    cprops[i] = {{"or"}}
+                end
+                table.insert(cprops[i][1], acc)
+                acc = {}
+            elseif string.match(u, "^_[0-9]+") then
+                local id = assert(tonumber(string.sub(u, 2)))
+                if not vars[id] then
+                    vars[id] = #tmpterms + 1
+                    if i == #lines then
+                        table.insert(tmpterms, {#tmpterms + 1})
+                    else
+                        table.insert(tmpterms, {#tmpterms + 1, id})
+                    end
+                end
+                table.insert(stack, vars[id])
+            elseif string.match(u, "^P[0-9]+") then
+                local id = tonumber(string.sub(u, 2))
+                table.insert(acc, table.move(stack, 1, #stack, 3, {"cprop", id}))
+                stack = {}
+            elseif string.match(u, "^%-?[0-9]+") then
+                local num = tonumber(string.sub(u, 1))
+                table.insert(tmpterms, {#tmpterms + 1, "num", num})
+                table.insert(stack, #tmpterms)
+            else
+                local id = 0
+                for j, p in ipairs(Props) do
+                    if p == u then
+                        id = j
+                        break
+                    end
+                end
+                assert(id ~= 0, "parser_readable: unknown token")
+                table.insert(acc, table.move(stack, 1, #stack, 3, {"prop", id}))
+                stack = {}
+            end
+        end
+        if cprops[i] == nil then
+            cprops[i] = acc
+        else
+            table.insert(cprops[i][1], acc)
+        end
+        cprops[i].terms = tmpterms
+    end
+    local initial_goal = table.remove(cprops)
+    local initial_terms = initial_goal.terms
+    initial_goal.terms = nil
+    return initial_goal, cprops, initial_terms
+end
+
+local parsers = {parser_nyan, parser_readable}
 
 ---ゴールとユーザー定義関係から代入を求める
 ---- -1 -> 未完成
@@ -549,19 +633,39 @@ local function main(prog, parse_mode, debug_handler)
     assert(result_terms[2][2] == "world", "main: terms[2] is not a world")
 end
 
-local arg = {...}
+local function _arg_parse(arg)
+    local out = {arg[1]}
+    for i = 2, #arg do
+        local c = arg[i]
+        if c:match("^%-[^%-]") then
+            for j = 2, c:len() do
+                out[c:sub(j, j)] = true
+            end
+        elseif out.d == true then
+            out["d"] = c
+        else
+            table.insert(out, c)
+        end
+    end
+    return out
+end
+
+local arg = _arg_parse{...}
 local file = assert(io.open(arg[1], "r"))
 local prog = file:read("a")
 file:close()
 
 local log = nil
-if arg[2] == "-d" then
-    if arg[3] == nil then
-        log = assert(io.open("log/".. os.date("%Y%m%d%H%M%S") ..".log", "w"))
+if arg.d then
+    if arg.d == true then
+        log = assert(io.open(os.date("%Y%m%d%H%M%S") ..".log", "w"))
     else
-        log = assert(io.open(arg[3], "w"))
+        log = assert(io.open(arg.d, "w"))
     end
 end
+
+local parser_mode = 1
+if arg.r then parser_mode = 2 end
 
 local function debug_write(t, ind, goals, terms_table, dif, flag)
     assert(log)
@@ -570,10 +674,8 @@ local function debug_write(t, ind, goals, terms_table, dif, flag)
 end
 
 if log then
-    main(prog, 1, debug_write)
+    main(prog, parser_mode, debug_write)
 else
-    main(prog, 1)
+    main(prog, parser_mode)
 end
 if log then log:close() end
-
-
