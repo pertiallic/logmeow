@@ -121,7 +121,7 @@ local builtins = {
      function (x) return true end}
 }
 
-local function _count_vars_new(args, terms_table)
+local function _count_vars(args, terms_table)
     local ifvar = {}
     local c = 0
     for i, v in ipairs(args) do
@@ -133,7 +133,7 @@ local function _count_vars_new(args, terms_table)
     return  c, ifvar
 end
 
-local function _check_types_new(args, argtype, terms_table)
+local function _check_types(args, argtype, terms_table)
     if #args < #argtype then return false end
     for i = 1, #argtype do
         if argtype[i] ~= "any" and #terms_table[args[i]] ~= 1 and argtype[i] ~= terms_table[args[i]][2] then return false end
@@ -285,7 +285,7 @@ end
 local function calc_subst_of_builtin(prop, terms_table)
     assert(prop[1] == "prop", "calc_subst_of_builtin_new: the type is not prop")
     local argdatas = {}
-    local numvar, ifvar = _count_vars_new(table.move(prop, 3, #prop, 1, argdatas), terms_table)
+    local numvar, ifvar = _count_vars(table.move(prop, 3, #prop, 1, argdatas), terms_table)
     local propindex = prop[2]
     local propdata = builtins[propindex]
     local arity = propdata.arity
@@ -305,7 +305,7 @@ local function calc_subst_of_builtin(prop, terms_table)
         return 1, {}
     end
     if numvar == 2 then return -1 end
-    if not _check_types_new(argdatas, propdata.argtype, terms_table) then return 0 end
+    if not _check_types(argdatas, propdata.argtype, terms_table) then return 0 end
     if propdata.type == "output" then
         if not (ifvar[3]) then return 0 end
         local c = utf8.char(terms_table[argdatas[2]][3])
@@ -535,25 +535,26 @@ local parsers = {parser_nyan, parser_readable}
 ---@param goals table パースしたやつ
 ---@param cprops table ユーザー定義関係の一覧
 ---@param terms_table table 項の対応をみる
----@param debug_handler? fun(t, ind, goals, terms_table, dif, flag)
+---@param layer integer 何層下にいるか
+---@param debug_handler? fun(t, ind, goals, terms_table, dif, flag, layer)
 ---@return integer
 ---@return table?
 ---@return table?
-local function calc_subst(goals, cprops, terms_table, debug_handler)
+local function calc_subst(goals, cprops, terms_table, layer, debug_handler)
     local dif = {}
     local t = 1
-    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "start") end
+    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "start", layer) end
     while t <= #goals do
         --print(t, _table_to_string_i(goals), _table_to_string_i(terms_table))
         if goals[t][1] == "prop" then
-            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "prop") end
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "prop", layer) end
             local result, subst = calc_subst_of_builtin(goals[t], terms_table)
             if result == -1 then
                 t = t + 1
                 goto continue
             end
             if result == 0 then
-                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_0") end
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_0", layer) end
                 return 0
             end
             assert(subst ~= nil, "calc_subst: prop: subst is nil")
@@ -561,13 +562,13 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             _subst_props_subst(goals, subst)
             _subst_composit(dif, subst)
             if #goals == 0 then
-                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1") end
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1", layer) end
                 return 1, dif, terms_table
             end
             t = 1
         end
         if goals[t][1] == "cprop" then
-            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "cprop") end
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "cprop", layer) end
             local propdata = _deep_copy(cprops[goals[t][2]])
             local subst = {}
             local tmp_terms_table = {}
@@ -595,7 +596,7 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             t = 1
         end
         if goals[t][1] == "or" then
-            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "or") end
+            if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "or", layer) end
             local result = -1
             local subst
             local terms_table_new = {}
@@ -603,8 +604,8 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             local terms_table_new_maybe
             while ind <= (#goals[t] - 1) do
                 terms_table_new = _deep_copy(terms_table)
-                if debug_handler then debug_handler(t, ind, goals, terms_table, dif, "\ncreate_branch") end
-                result, subst, terms_table_new_maybe = calc_subst(_deep_copy(goals[t][ind + 1]), cprops, terms_table_new, debug_handler)
+                if debug_handler then debug_handler(t, ind, goals, terms_table, dif, "create_branch", layer) end
+                result, subst, terms_table_new_maybe = calc_subst(_deep_copy(goals[t][ind + 1]), cprops, terms_table_new, layer + 1, debug_handler)
                 if result == 0 then
                     table.remove(goals[t], ind + 1)
                     if #goals[t] == 2 then
@@ -630,20 +631,20 @@ local function calc_subst(goals, cprops, terms_table, debug_handler)
             _subst_props_subst(goals, subst)
             _subst_composit(dif, subst)
             if #goals == 0 then
-                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1") end
+                if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_1", layer) end
                 return 1, dif, terms_table
             end
         end
         ::continue::
     end
-    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_-1") end
+    if debug_handler then debug_handler(t, 0, goals, terms_table, dif, "return_-1", layer) end
     return -1
 end
 
 local function main(prog, parse_mode, debug_handler)
     parse_mode = parse_mode or 1
     local initial_goals, cprops, initial_terms = parsers[parse_mode](prog)
-    local result, _, result_terms = calc_subst(initial_goals, cprops, initial_terms, debug_handler)
+    local result, _, result_terms = calc_subst(initial_goals, cprops, initial_terms, 0, debug_handler)
     assert(result == 1, "main: result is not 1")
     assert(result_terms ~= nil, "main: result_terms is nil")
     assert(result_terms[2][2] == "world", "main: terms[2] is not a world")
@@ -683,10 +684,10 @@ end
 local parser_mode = 1
 if arg.r then parser_mode = 2 end
 
-local function debug_write(t, ind, goals, terms_table, dif, flag)
+local function debug_write(t, ind, goals, terms_table, dif, flag, layer)
     assert(log)
-    log:write(flag .. "\n")
-    log:write(_format_goals(goals, terms_table, t, ind) .. "\n")
+    log:write(string.rep(" ", layer) .. flag .. "\n")
+    log:write(string.rep(" ", layer) .. _format_goals(goals, terms_table, t, ind) .. "\n")
 end
 
 if log then
