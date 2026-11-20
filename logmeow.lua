@@ -264,7 +264,7 @@ local function handle_input_new(world, to)
     to[2] = "world"
     to[3] = world[3]
     to[4] = world[4]
-    if world[3] == "" then to[3] = io.read() end
+    if world[3] == "" then to[3] = io.read("L") end
     if to[3] == "" then to[3] = to[3] .. "\0" end
     local c = string.sub(to[3], 1, utf8.offset(to[3], 2) - 1)
     to[3] = string.sub(to[3], utf8.offset(to[3], 2), -1)
