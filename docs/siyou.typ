@@ -448,3 +448,41 @@ Logmeowでは自然数値（0を含まない）を使って変数・built-in関�
 `[97, _3, 101, _1]` $->$ 順序対 `97 _3 101 _1 pair pair pair`\
 `mul` $->$ built-in関係 `mul`\
 `P1` $->$ 一行目に定義されている関係
+
+== その他
+
+=== エラー
+
+- `calc_subst_of_builtin_new: insufficient arguments`: 何らかのbuilt-in命題への引数が足りません
+- `parser_readable: length of pair is less than 2`: 読みやすい方で書いたとき、`[]`もしくは`[1]`のようになっています
+- `parser_readable: unknown token`: 未知のトークンです
+- `parser_nyan: unknown token"`: 未知のトークンです
+- `main: result is not 1`: プログラムが正しく終了しませんでした
+- `main: terms[2] is not a world`: 最初のゴールの最初の命題の二番目の引数に`world`型が代入されませんでした
+
+それ以外はプログラム側のバグです。
+
+=== デバッグの見方
+
+デバッグログは二行で一単位です。
+
+#showycode(title: "デバッグログの例1")[
+```
+   prop
+   <2 2 _242 mul>, 4 _242 lt
+```
+]
+#showycode(title: "デバッグログの例2")[
+```
+ prop
+ <world(, N) [121, 97, 110, 10] _2 print>
+```
+]
+
+全体のインデントは現在何層目の処理をしているかを示しています。
+
+一行目はどの処理を行うかを示しています。大体の場合無視して大丈夫です。
+
+二行目は現在のゴールを示しています。基本的な見方は#ref(<otherway>)と同じです。`<>`に囲まれているところが今処理されようとしているものです。
+
+`world`は`world([今までのインプット], [今までのアウトプット])`という感じに表記されます。
