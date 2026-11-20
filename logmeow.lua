@@ -472,7 +472,7 @@ local function parser_readable(prog)
                     table.insert(tmpterms[#tmpterms], 3, t)
                     t = table.remove(stack)
                 end
-                assert(#tmpterms[#tmpterms] >= 4, "parser_readable: length of pair is 1")
+                assert(#tmpterms[#tmpterms] >= 4, "parser_readable: length of pair is less than 2")
                 table.insert(stack, #tmpterms)
             elseif u == "or" then
                 if cprops[i] == nil then
