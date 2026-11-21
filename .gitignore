@@ -1,3 +1,4 @@
 luac.out
 *.log
 hidden/*
+out.meo*
